@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>동물상 찾기 (오류수정판)</title>
+    <link href="https://fonts.googleapis.com/css2?family=Jua&display=swap" rel="stylesheet">
+    <style>
+        /* 스타일은 그대로 유지 */
+        body { font-family: 'Jua', sans-serif; background-color: #fff0f5; background-image: radial-gradient(#ffb7b2 20%, transparent 20%), radial-gradient(#ffb7b2 20%, transparent 20%); background-position: 0 0, 10px 10px; background-size: 20px 20px; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; color: #5d4037; }
+        .container { background-color: #ffffff; padding: 40px; border-radius: 30px; box-shadow: 0 10px 25px rgba(255, 105, 180, 0.3); text-align: center; width: 90%; max-width: 420px; position: relative; border: 5px dashed #ffdac1; }
+        h1 { margin: 10px 0; font-size: 2.5rem; color: #ff6f61; }
+        h2 { margin: 0 0 25px; font-size: 1.2rem; color: #888; font-weight: normal; }
+        .btn { background: linear-gradient(to bottom, #ff9a9e, #fad0c4); color: white; border: none; padding: 15px 40px; font-size: 1.5rem; font-family: 'Jua', sans-serif; border-radius: 50px; cursor: pointer; transition: all 0.2s; box-shadow: 0 6px 0 #ef8088; margin-top: 10px; }
+        .btn:hover { transform: translateY(2px); box-shadow: 0 4px 0 #ef8088; }
+        .btn:active { transform: translateY(6px); box-shadow: none; }
+        .btn-retry { background: linear-gradient(to bottom, #a1c4fd, #c2e9fb); box-shadow: 0 6px 0 #89b0ea; font-size: 1.2rem; margin-top: 20px; }
+        .btn-retry:hover { box-shadow: 0 4px 0 #89b0ea; }
+        .webcam-wrapper { position: relative; width: 300px; height: 300px; margin: 20px auto; border-radius: 50%; border: 8px solid #ffdac1; overflow: hidden; display: none; background-color: #fff; }
+        #webcam-container canvas { width: 100%; height: 100%; object-fit: cover; }
+        #countdown-text { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); font-size: 120px; color: #fff; -webkit-text-stroke: 3px #ff6f61; font-weight: bold; display: none; z-index: 10; }
+        #result-area { display: none; margin-top: 25px; background-color: #fff9f0; padding: 20px; border-radius: 20px; }
+        .result-title { font-size: 1.8rem; color: #ff6f61; margin-bottom: 15px; }
+        .label-wrapper { margin-bottom: 12px; text-align: left; }
+        .progress-bg { background-color: #eee; border-radius: 15px; height: 30px; width: 100%; overflow: hidden; margin-top: 5px; }
+        .progress-bar { height: 100%; width: 0%; transition: width 1s ease; display: flex; align-items: center; justify-content: flex-end; border-radius: 15px; }
+        .progress-text { color: white; font-size: 1rem; font-weight: bold; padding-right: 12px; }
+        .blink { animation: blinker 1s linear infinite; }
+        @keyframes blinker { 50% { opacity: 0; } }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <h1>동물상 찾기</h1>
+        <h2 id="status-msg">나는 어떤 동물을 닮았을까?</h2>
+        
+        <div id="control-area">
+            <button class="btn" id="start-btn" onclick="init()">시작하기!</button>
+        </div>
+
+        <div class="webcam-wrapper" id="webcam-wrapper">
+            <div id="countdown-text">3</div>
+            <div id="webcam-container"></div>
+        </div>
+
+        <div id="result-area">
+            <div class="result-title" id="result-title"></div>
+            <div id="label-container"></div>
+            <button class="btn btn-retry" onclick="retry()">다시 해볼래!</button>
+        </div>
+    </div>
+    
+    <audio id="shutter-sound" src="https://actions.google.com/sounds/v1/cartoon/camera_shutter.ogg"></audio>
+
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@latest/dist/tf.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@teachablemachine/image@latest/dist/teachablemachine-image.min.js"></script>
+    
+    <script type="text/javascript">
+        // ▼▼▼▼▼▼▼▼ 주소 확인 필수 ▼▼▼▼▼▼▼▼
+        const URL = "https://teachablemachine.withgoogle.com/models/y9sxqkYAO/";
+        // ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
+
+        let model, webcam, maxPredictions;
+        let isModelLoaded = false;
+        let loopId;
+
+        async function init() {
+            const startBtn = document.getElementById("start-btn");
+            
+            // 1. 버튼 반응 확인
+            console.log("시작하기 버튼 클릭됨"); 
+            startBtn.innerText = "로딩 중...";
+            startBtn.classList.add("blink");
+            startBtn.disabled = true;
+
+            try {
+                // 2. 모델 로딩 시도
+                if(!isModelLoaded) {
+                    const modelURL = URL + "model.json";
+                    const metadataURL = URL + "metadata.json";
+                    console.log("모델 로딩 시작: " + modelURL);
+                    model = await tmImage.load(modelURL, metadataURL);
+                    maxPredictions = model.getTotalClasses();
+                    isModelLoaded = true;
+                    console.log("모델 로딩 성공");
+                }
+
+                // 3. 웹캠 설정 시도
+                const flip = true; 
+                webcam = new tmImage.Webcam(300, 300, flip); 
+                await webcam.setup(); 
+                console.log("웹캠 설정 성공");
+                await webcam.play();
+                window.requestAnimationFrame(loop);
+
+                document.getElementById("webcam-container").innerHTML = "";
+                document.getElementById("webcam-container").appendChild(webcam.canvas);
+                
+                document.getElementById("webcam-wrapper").style.display = "block";
+                startBtn.style.display = "none";
+                document.getElementById("status-msg").innerText = "카메라를 봐주세요! 치~즈 ✌️";
+                
+                const controlArea = document.getElementById("control-area");
+                controlArea.style.display = "block";
+                controlArea.innerHTML = '<button class="btn" onclick="startCountdown()">사진 찍기 📸</button>';
+
+            } catch (error) {
+                // 4. 오류 잡기
+                console.error("오류 발생:", error);
+                alert("오류가 발생했습니다!\n\n원인: " + error.message + "\n\n(모델 주소가 정확한지, 카메라 권한이 있는지 확인해주세요)");
+                startBtn.innerText = "시작하기!";
+                startBtn.classList.remove("blink");
+                startBtn.disabled = false;
+            }
+        }
+
+        async function loop() {
+            webcam.update();
+            loopId = window.requestAnimationFrame(loop);
+        }
+
+        function speak(text) {
+            if (window.speechSynthesis) {
+                window.speechSynthesis.cancel(); 
+                const utterance = new SpeechSynthesisUtterance(text);
+                utterance.lang = 'ko-KR'; 
+                utterance.rate = 1.2; 
+                window.speechSynthesis.speak(utterance);
+            }
+        }
+
+        function startCountdown() {
+            const countdownElem = document.getElementById("countdown-text");
+            const btnArea = document.getElementById("control-area");
+            
+            btnArea.style.display = "none";
+            countdownElem.style.display = "block";
+            
+            let count = 3;
+            countdownElem.innerText = count;
+            speak("삼"); 
+
+            const timer = setInterval(() => {
+                count--;
+                if(count > 0) {
+                    countdownElem.innerText = count;
+                    if(count === 2) speak("이");
+                    if(count === 1) speak("일");
+                } else {
+                    clearInterval(timer);
+                    countdownElem.style.display = "none";
+                    playShutter(); 
+                    predict();
+                }
+            }, 1000); 
+        }
+
+        function playShutter() {
+            const audio = document.getElementById("shutter-sound");
+            audio.currentTime = 0; 
+            audio.play().catch(e => console.log("소리 재생 실패(브라우저 정책):", e));
+        }
+
+        async function predict() {
+            await webcam.stop();
+            if(loopId) {
+                window.cancelAnimationFrame(loopId);
+                loopId = null;
+            }
+            
+            const prediction = await model.predict(webcam.canvas);
+            
+            if(!prediction || prediction.length === 0) {
+                alert("얼굴을 찾을 수 없어요!");
+                retry();
+                return;
+            }
+
+            prediction.sort((a, b) => parseFloat(b.probability) - parseFloat(a.probability));
+            const bestClass = prediction[0].className;
+            const bestScore = (prediction[0].probability * 100).toFixed(0);
+
+            document.getElementById("result-title").innerHTML = `와! <span style="color:#ff6b6b">${bestClass}</span>을(를)<br>${bestScore}% 닮았어요!`;
+            document.getElementById("status-msg").innerText = "결과가 나왔어요!";
+
+            const labelContainer = document.getElementById("label-container");
+            labelContainer.innerHTML = "";
+            const colors = ["#ff9a9e", "#a18cd1", "#fad0c4", "#84fab0"];
+
+            for (let i = 0; i < maxPredictions; i++) {
+                const classPrediction = prediction[i].className;
+                const probability = (prediction[i].probability * 100).toFixed(1);
+                const color = colors[i % colors.length];
+
+                const html = `
+                    <div class="label-wrapper">
+                        <span class="label-name">${classPrediction}</span>
+                        <div class="progress-bg">
+                            <div class="progress-bar" style="width: ${probability}%; background: ${color};">
+                                <span class="progress-text">${probability}%</span>
+                            </div>
+                        </div>
+                    </div>
+                `;
+                labelContainer.innerHTML += html;
+            }
+            document.getElementById("result-area").style.display = "block";
+        }
+
+        async function retry() {
+            document.getElementById("result-area").style.display = "none";
+            document.getElementById("webcam-wrapper").style.display = "block";
+            document.getElementById("status-msg").innerText = "다시 한번 찍어볼까요? ✌️";
+            
+            const controlArea = document.getElementById("control-area");
+            controlArea.style.display = "block";
+
+            await webcam.play();
+            if(!loopId) {
+                window.requestAnimationFrame(loop);
+            }
+        }
+    </script>
+</body>
+</html>
